@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { Waypoint, parseKmlWaypoints } from './shared/parseKmz';
 // extension host でのバンドル問題を避けるため、JSZip は動的に読み込む
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const JSZip = require('jszip');
@@ -152,70 +153,6 @@ export function activate(context: vscode.ExtensionContext) {
       }
     )
   );
-}
-
-interface Waypoint {
-  index: number;
-  lon: number;
-  lat: number;
-  alt: number;
-}
-
-// `<Placemark>` ブロックから wpml の数値要素を取り出す（見つからなければ null）
-function extractWpmlNumber(block: string, tag: string): number | null {
-  const m = new RegExp(`<wpml:${tag}>\\s*(-?[\\d.]+)\\s*</wpml:${tag}>`).exec(block);
-  if (!m) { return null; }
-  const value = parseFloat(m[1]);
-  return Number.isFinite(value) ? value : null;
-}
-
-// KML の内容から waypointを抽出する
-function parseKmlWaypoints(kml: string): Waypoint[] {
-  const waypoints: Waypoint[] = [];
-  // waypointとなる `<Placemark>` を抽出し、座標と index を取り出す
-  const placemarkRegex = /<Placemark[\s\S]*?<\/Placemark>/g;
-  const coordRegex = /<coordinates>\s*([\s\S]*?)\s*<\/coordinates>/;
-  const indexRegex = /<(?:wpml:)?index>(\d+)<\/(?:wpml:)?index>/;
-
-  let match: RegExpExecArray | null;
-  let autoIndex = 1;
-
-  while ((match = placemarkRegex.exec(kml)) !== null) {
-    const block = match[0];
-    const coordMatch = coordRegex.exec(block);
-    if (!coordMatch) { continue; }
-
-    const firstCoord = coordMatch[1].trim().split(/\s+/)[0];
-    const parts = firstCoord.split(',');
-    if (parts.length < 2) { continue; }
-
-    const lon = parseFloat(parts[0]);
-    const lat = parseFloat(parts[1]);
-    if (!Number.isFinite(lon) || !Number.isFinite(lat)) { continue; }
-
-    // 高度の扱いは export 元で異なる:
-    // - DJI Pilot 2: `<coordinates>` が lon,lat,alt の 3 値を持つことがある
-    // - FlightHub 2 / WPML 標準: `<coordinates>` は lon,lat の 2 値で、高度は
-    //   `<wpml:executeHeight>` / `<wpml:height>` / `<wpml:ellipsoidHeight>` に格納される
-    const altFromCoord = parts.length >= 3 ? parseFloat(parts[2]) : NaN;
-    const alt = Number.isFinite(altFromCoord)
-      ? altFromCoord
-      : (extractWpmlNumber(block, 'executeHeight')
-        ?? extractWpmlNumber(block, 'height')
-        ?? extractWpmlNumber(block, 'ellipsoidHeight')
-        ?? 0);
-
-    const indexMatch = indexRegex.exec(block);
-    const index = indexMatch ? parseInt(indexMatch[1]) : autoIndex;
-    autoIndex++;
-
-    waypoints.push({ index, lon, lat, alt });
-  }
-
-  // `<Placemark>` を見つけた順に一旦 `waypoints` に追加するが、waypoint の論理的な順序（`wpml:index`）が保証されないため、
-  // indexでsortして正しい順序に並び替える。これにより、`wpml:index` が存在しない場合でも、ファイル内の順序で waypoint を表示できる
-  waypoints.sort((a, b) => a.index - b.index);
-  return waypoints;
 }
 
 // KML から抽出した waypoint データを元に、Webview に表示する HTML を生成する
