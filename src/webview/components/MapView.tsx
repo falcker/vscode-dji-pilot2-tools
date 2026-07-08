@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import * as DeckGL from 'deck.gl';
-import { Waypoint } from '../types';
+import { EditingApi, Waypoint } from '../types';
+import TransformPanel from './TransformPanel';
 
 type BasemapKey = 'seamless' | 'std' | 'osm';
 
@@ -88,15 +89,17 @@ interface Props {
   waypoints: Waypoint[];
   selectedIndex: number | null;
   onWaypointClick: (index: number | null) => void;
+  editing?: EditingApi;
 }
 
-export default function MapView({ waypoints, selectedIndex, onWaypointClick }: Props) {
+export default function MapView({ waypoints, selectedIndex, onWaypointClick, editing }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const overlayRef = useRef<any>(null);
   const is3DRef = useRef(true);
   const selectedIndexRef = useRef<number | null>(null);
   const showAllCamerasRef = useRef(false);
+  const editingRef = useRef<EditingApi | undefined>(editing);
   const [is3D, setIs3D] = useState(true);
   const [showAllCameras, setShowAllCameras] = useState(false);
   const [basemap, setBasemap] = useState<BasemapKey>('seamless');
@@ -175,12 +178,32 @@ export default function MapView({ waypoints, selectedIndex, onWaypointClick }: P
     return layers;
   }
 
+  function buildAnchorLayers(): any[] {
+    const na = editingRef.current?.newAnchor;
+    if (!na) { return []; }
+    return [
+      new DeckGL.ScatterplotLayer({
+        id: 'new-anchor',
+        data: [na],
+        getPosition: (d: [number, number]) => [d[0], d[1], 0],
+        getFillColor: [255, 0, 128],
+        getLineColor: [255, 255, 255],
+        stroked: true,
+        getLineWidth: 2,
+        lineWidthMinPixels: 2,
+        getRadius: 4,
+        radiusMinPixels: 7,
+      }),
+    ];
+  }
+
   function buildLayers(is3D: boolean) {
     const getZ = (w: Waypoint) => is3D ? w.alt : 0;
     const wpData = waypoints.map((w, i) => ({ ...w, color: getWpColor(i, waypoints.length) }));
 
     return [
       ...buildCameraLayers(is3D),
+      ...buildAnchorLayers(),
       new DeckGL.PathLayer({
         id: 'ground-path',
         data: [{ path: waypoints.map(w => [w.lon, w.lat, 0]) }],
@@ -277,6 +300,14 @@ export default function MapView({ waypoints, selectedIndex, onWaypointClick }: P
     });
     mapRef.current = map;
 
+    // 移動先ピック中の地図クリックで新しいアンカー座標を取得する
+    map.on('click', (e: any) => {
+      const ed = editingRef.current;
+      if (ed && ed.picking) {
+        ed.onNewAnchor([e.lngLat.lng, e.lngLat.lat]);
+      }
+    });
+
     map.on('load', () => {
       // 初期ロードは最小限のレイヤーで 2D のみ
       // 3D レイヤーは後から追加
@@ -338,6 +369,25 @@ export default function MapView({ waypoints, selectedIndex, onWaypointClick }: P
     overlayRef.current?.setProps({ layers: buildLayers(is3DRef.current) });
   }, [selectedIndex]);
 
+  // editing の最新値を ref に反映し、ピック中はカーソルを変える
+  useEffect(() => {
+    editingRef.current = editing;
+    if (mapRef.current) {
+      mapRef.current.getCanvas().style.cursor = editing?.picking ? 'crosshair' : '';
+    }
+  }, [editing]);
+
+  // プレビュー座標（waypoints）や移動先が変わったらレイヤーを描き直す
+  useEffect(() => {
+    overlayRef.current?.setProps({ layers: buildLayers(is3DRef.current) });
+  }, [waypoints, editing?.newAnchor]);
+
+  // 移動先が設定されたらそこへ地図を寄せる
+  useEffect(() => {
+    const na = editing?.newAnchor;
+    if (na && mapRef.current) { mapRef.current.easeTo({ center: na, duration: 600 }); }
+  }, [editing?.newAnchor && editing.newAnchor[0], editing?.newAnchor && editing.newAnchor[1]]);
+
   const toggle3D = () => {
     const next = !is3DRef.current;
     is3DRef.current = next;
@@ -370,6 +420,7 @@ export default function MapView({ waypoints, selectedIndex, onWaypointClick }: P
   return (
     <div id="map-wrap">
       <div ref={containerRef} id="map" />
+      {editing && <TransformPanel editing={editing} />}
       <div id="basemap-switcher">
         {(Object.keys(BASEMAPS) as BasemapKey[]).map(key => (
           <button
