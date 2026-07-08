@@ -13,6 +13,10 @@ const maplibreCss = readFileSync(require.resolve('maplibre-gl/dist/maplibre-gl.c
 const html = readFileSync('web/index.html', 'utf-8').replace('/* __MAPLIBRE_CSS__ */', maplibreCss);
 writeFileSync(`${OUT_DIR}/index.html`, html);
 
+// ショートカット定義とそのスキーマを配置（実行時に fetch し、変更をホットリロード）
+writeFileSync(`${OUT_DIR}/keybindings.json`, readFileSync('web/keybindings.json', 'utf-8'));
+writeFileSync(`${OUT_DIR}/keybindings.schema.json`, readFileSync('web/keybindings.schema.json', 'utf-8'));
+
 const options = {
   entryPoints: ['src/webview/standalone.tsx'],
   bundle: true,

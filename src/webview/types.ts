@@ -44,8 +44,16 @@ export interface EditingApi {
   onDragMove: (ll: LonLat) => void;
   onDragEnd: () => void;
 
+  // --- ボックス（マーキー）選択ツール ---
+  boxSelect: boolean;
+  onToggleBox: () => void;
+  onSelectMany: (indices: number[], additive: boolean) => void;
+
   // --- 安全装置: 近接（重なり）waypoint の index ---
   warnings: number[];
+
+  // --- ショートカット表示用（action -> キー一覧） ---
+  shortcuts: { action: string; keys: string[] }[];
 }
 
 declare global {

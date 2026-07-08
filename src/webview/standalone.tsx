@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import JSZip from 'jszip';
 import App from './App';
@@ -6,7 +6,17 @@ import { parseKmlWaypoints, Waypoint } from '../shared/parseKmz';
 import { RawKmz, kmzEntries } from '../shared/kmzDoc';
 import { LonLat, SelXform, isSelIdentity, transformSelectedWaypoints } from '../shared/transform';
 import { deleteWaypoints, duplicateWaypoints, metersToDegrees, nearCoincidentWaypoints, transformSelection } from '../shared/edits';
+import { bindingSummary, eventCombo, parseBindings } from './shortcuts';
 import { EditingApi, SelectMods } from './types';
+
+const ROTATE_STEP = 5;    // ショートカット回転量（度）
+const SCALE_STEP = 0.05;  // ショートカット拡大量
+const NUDGE_STEP = 5;     // ショートカット移動量（メートル）
+
+function isTypingTarget(el: EventTarget | null): boolean {
+  const t = el as HTMLElement | null;
+  return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+}
 
 interface Loaded {
   waypoints: Waypoint[]; // 元の（未変換の）waypoint
@@ -72,6 +82,43 @@ function Standalone() {
   const [pendMove, setPendMove] = useState<LonLat>([0, 0]);
   const [pickMode, setPickMode] = useState<'move' | null>(null);
   const dragStartRef = useRef<LonLat | null>(null);
+
+  // ボックス選択ツール
+  const [boxSelect, setBoxSelect] = useState(false);
+
+  // ショートカット: 別ファイル keybindings.json を読み込み、変更をホットリロード
+  const bindingsRef = useRef<Map<string, string>>(new Map());
+  const actionsRef = useRef<Record<string, () => void>>({});
+  const [shortcuts, setShortcuts] = useState<{ action: string; keys: string[] }[]>([]);
+
+  useEffect(() => {
+    let alive = true;
+    let last = '';
+    const load = async () => {
+      try {
+        const text = await (await fetch('./keybindings.json', { cache: 'no-store' })).text();
+        if (!alive || text === last) { return; }
+        last = text;
+        const json = JSON.parse(text);
+        bindingsRef.current = parseBindings(json);
+        setShortcuts(bindingSummary(json));
+      } catch { /* ファイルが無い/不正なら無視（既定は無割当） */ }
+    };
+    void load();
+    const id = setInterval(() => void load(), 2000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) { return; }
+      const action = bindingsRef.current.get(eventCombo(e));
+      const fn = action && actionsRef.current[action];
+      if (fn) { e.preventDefault(); fn(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const resetXform = useCallback(() => {
     setSelRotationDeg(0);
@@ -203,7 +250,36 @@ function Standalone() {
         dragStartRef.current = null;
         if (s) { commitXform(selXform); }
       },
+      boxSelect,
+      onToggleBox: () => setBoxSelect((v) => !v),
+      onSelectMany: (indices, additive) => {
+        resetXform();
+        setSelection((prev) => (additive ? Array.from(new Set([...prev, ...indices])) : indices));
+        selAnchorRef.current = indices.length ? indices[indices.length - 1] : null;
+      },
       warnings,
+      shortcuts,
+    };
+
+    // keydown ハンドラが参照するアクション割当（毎レンダー最新化）
+    actionsRef.current = {
+      duplicate: editing.onDuplicate,
+      delete: editing.onDelete,
+      selectAll: editing.onSelectAll,
+      clearSelection: editing.onClearSelection,
+      apply: editing.onApply,
+      resetTransform: editing.onResetXform,
+      nudgeNorth: () => editing.onNudge(0, NUDGE_STEP),
+      nudgeSouth: () => editing.onNudge(0, -NUDGE_STEP),
+      nudgeWest: () => editing.onNudge(-NUDGE_STEP, 0),
+      nudgeEast: () => editing.onNudge(NUDGE_STEP, 0),
+      rotateLeft: () => setSelRotationDeg((v) => v - ROTATE_STEP),
+      rotateRight: () => setSelRotationDeg((v) => v + ROTATE_STEP),
+      scaleUp: () => setSelScale((v) => Math.round((v + SCALE_STEP) * 100) / 100),
+      scaleDown: () => setSelScale((v) => Math.max(0.05, Math.round((v - SCALE_STEP) * 100) / 100)),
+      moveMode: editing.onStartMove,
+      boxSelect: editing.onToggleBox,
+      export: editing.onExport,
     };
     return (
       <>

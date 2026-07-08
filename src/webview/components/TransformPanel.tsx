@@ -19,7 +19,7 @@ const hr: React.CSSProperties = { border: 0, borderTop: '1px solid #3c3c3c', mar
 const numIn: React.CSSProperties = { width: 54, background: '#1e1e1e', color: '#ddd', border: '1px solid #555', borderRadius: 3, padding: '2px 4px', fontSize: 11 };
 
 export default function TransformPanel({ editing }: Props) {
-  const { selectionCount, selRotationDeg, selScale, xformActive, pickMode, warnings } = editing;
+  const { selectionCount, selRotationDeg, selScale, xformActive, pickMode, warnings, boxSelect, shortcuts } = editing;
   const [step, setStep] = useState(5);
   const has = selectionCount > 0;
   const dim = (on: boolean): React.CSSProperties => (on ? {} : { opacity: 0.5, cursor: 'default' });
@@ -38,10 +38,16 @@ export default function TransformPanel({ editing }: Props) {
         <button style={{ ...btn, flex: 1 }} onClick={editing.onSelectAll}>Select all</button>
         <button style={{ ...btn, flex: 1, ...dim(has) }} disabled={!has} onClick={editing.onClearSelection}>Clear</button>
       </div>
-      <div style={row}>
+      <div style={{ ...row, marginBottom: 6 }}>
         <button style={{ ...btn, flex: 1, ...dim(has) }} disabled={!has} onClick={editing.onDuplicate}>⧉ Duplicate</button>
         <button style={{ ...btn, flex: 1, ...dim(has) }} disabled={!has} onClick={editing.onDelete}>🗑 Delete</button>
       </div>
+      <button
+        style={{ ...btn, width: '100%', background: boxSelect ? '#0061a4' : '#333', borderColor: boxSelect ? '#0061a4' : '#555', color: boxSelect ? '#fff' : '#ddd' }}
+        onClick={editing.onToggleBox}
+      >
+        {boxSelect ? '▣ Box select: ON (drag map)' : '▢ Box select tool'}
+      </button>
 
       <hr style={hr} />
 
@@ -85,6 +91,21 @@ export default function TransformPanel({ editing }: Props) {
 
       <hr style={hr} />
       <button style={{ ...btn, width: '100%', background: '#0e7a0d', borderColor: '#0e7a0d', color: '#fff' }} onClick={editing.onExport}>⬇ Export KMZ</button>
+
+      {shortcuts.length > 0 && (
+        <details style={{ marginTop: 8, fontSize: 10, color: '#9aa' }}>
+          <summary style={{ cursor: 'pointer', color: '#bbb' }}>⌨ Shortcuts ({shortcuts.length})</summary>
+          <div style={{ marginTop: 4, display: 'grid', gridTemplateColumns: '1fr auto', gap: '2px 8px' }}>
+            {shortcuts.map((s) => (
+              <React.Fragment key={s.action}>
+                <span>{s.action}</span>
+                <span style={{ fontFamily: 'monospace', color: '#ddd' }}>{s.keys.join(' / ')}</span>
+              </React.Fragment>
+            ))}
+          </div>
+          <div style={{ marginTop: 4, color: '#777' }}>Edit <code>keybindings.json</code> — reloads automatically.</div>
+        </details>
+      )}
     </div>
   );
 }

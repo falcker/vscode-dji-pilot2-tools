@@ -129,6 +129,17 @@ model (`SelXform = {rotationDeg, scale, dLon, dLat}`) with live preview + Apply:
 
 Whole-path re-anchor ("stamp") is now just **Select all → Move/Rotate → Apply**.
 
+**Box-select tool**: a marquee overlay (`MapView`) selects every waypoint whose
+projected pixel falls inside a dragged rectangle (`onSelectMany`).
+
+**Keyboard shortcuts** (standalone): `src/webview/shortcuts.ts` maps a normalized
+key combo → action; bindings live in a separately-editable `web/keybindings.json`
+(with `web/keybindings.schema.json` for editor validation), copied to `dist/web`
+and **re-fetched every 2 s so edits hot-reload**. Defaults are gaming/editor-style
+(WASD/arrows = nudge, Q/E = rotate, +/- = scale, Ctrl+D = duplicate, Del = delete,
+Ctrl+A = select all, Esc = clear, Enter = apply, G = move, B = box select,
+Ctrl+S = export). The panel lists the live bindings.
+
 ### Still pending
 - **Extension write-back** (`CustomEditorProvider` + webview message passing +
   `showSaveDialog`) — editing remains standalone-only.

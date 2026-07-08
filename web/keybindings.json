@@ -1,0 +1,22 @@
+{
+  "$schema": "./keybindings.schema.json",
+  "bindings": {
+    "nudgeNorth": ["w", "arrowup"],
+    "nudgeSouth": ["s", "arrowdown"],
+    "nudgeWest": ["a", "arrowleft"],
+    "nudgeEast": ["d", "arrowright"],
+    "rotateLeft": "q",
+    "rotateRight": "e",
+    "scaleUp": "=",
+    "scaleDown": "-",
+    "duplicate": "ctrl+d",
+    "delete": ["delete", "backspace"],
+    "selectAll": "ctrl+a",
+    "clearSelection": "escape",
+    "apply": "enter",
+    "resetTransform": "ctrl+z",
+    "moveMode": "g",
+    "boxSelect": "b",
+    "export": "ctrl+s"
+  }
+}

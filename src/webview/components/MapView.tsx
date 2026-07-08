@@ -106,6 +106,8 @@ export default function MapView({ waypoints, selection, onSelect, editing }: Pro
   const [is3D, setIs3D] = useState(true);
   const [showAllCameras, setShowAllCameras] = useState(false);
   const [basemap, setBasemap] = useState<BasemapKey>('seamless');
+  const [box, setBox] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const boxStartRef = useRef<{ x: number; y: number } | null>(null);
 
   function buildCameraLayers(is3D: boolean): any[] {
     const selSet = new Set(selectionRef.current);
@@ -432,10 +434,60 @@ export default function MapView({ waypoints, selection, onSelect, editing }: Pro
     osm: 'OpenStreetMap',
   };
 
+  // ボックス（マーキー）選択: ドラッグした矩形内の waypoint を選択する
+  const localXY = (e: React.PointerEvent) => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+  const onBoxDown = (e: React.PointerEvent) => {
+    const { x, y } = localXY(e);
+    boxStartRef.current = { x, y };
+    setBox({ x0: x, y0: y, x1: x, y1: y });
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const onBoxMove = (e: React.PointerEvent) => {
+    const s = boxStartRef.current;
+    if (!s) { return; }
+    const { x, y } = localXY(e);
+    setBox({ x0: s.x, y0: s.y, x1: x, y1: y });
+  };
+  const onBoxUp = (e: React.PointerEvent) => {
+    const s = boxStartRef.current;
+    boxStartRef.current = null;
+    setBox(null);
+    if (!s || !mapRef.current || !editingRef.current) { return; }
+    const { x, y } = localXY(e);
+    const minX = Math.min(s.x, x), maxX = Math.max(s.x, x), minY = Math.min(s.y, y), maxY = Math.max(s.y, y);
+    if (maxX - minX < 3 && maxY - minY < 3) { return; } // 極小はクリック扱いで無視
+    const sel: number[] = [];
+    for (const w of waypoints) {
+      const p = mapRef.current.project([w.lon, w.lat]);
+      if (p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY) { sel.push(w.index); }
+    }
+    editingRef.current.onSelectMany(sel, e.shiftKey);
+  };
+
   return (
     <div id="map-wrap">
       <div ref={containerRef} id="map" />
       {editing && <TransformPanel editing={editing} />}
+      {editing?.boxSelect && (
+        <div
+          style={{ position: 'absolute', inset: 0, zIndex: 5, cursor: 'crosshair' }}
+          onPointerDown={onBoxDown}
+          onPointerMove={onBoxMove}
+          onPointerUp={onBoxUp}
+        >
+          {box && (
+            <div style={{
+              position: 'absolute',
+              left: Math.min(box.x0, box.x1), top: Math.min(box.y0, box.y1),
+              width: Math.abs(box.x1 - box.x0), height: Math.abs(box.y1 - box.y0),
+              border: '1.5px solid #4aa3ff', background: 'rgba(74,163,255,0.15)', pointerEvents: 'none',
+            }} />
+          )}
+        </div>
+      )}
       <div id="basemap-switcher">
         {(Object.keys(BASEMAPS) as BasemapKey[]).map(key => (
           <button

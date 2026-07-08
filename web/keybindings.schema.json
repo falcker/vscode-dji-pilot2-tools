@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://falcker.dev/dji-kmz-editor/keybindings.schema.json",
+  "title": "DJI KMZ editor keyboard shortcuts",
+  "description": "Maps editor actions to keyboard shortcuts. Edit keybindings.json and save; the viewer reloads it automatically (polled every ~2s). Key syntax: optional modifiers (ctrl, meta, alt, shift) joined with '+', then the key, e.g. \"ctrl+d\", \"shift+arrowup\", \"w\", \"=\". Key names are the lowercased DOM KeyboardEvent.key (\"arrowup\", \"delete\", \"enter\", \"escape\", \"space\"). A value may be a single key string or an array of alternatives.",
+  "type": "object",
+  "required": ["bindings"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "bindings": {
+      "type": "object",
+      "description": "action -> key (or list of keys). Unknown actions are ignored, so it is safe to add your own.",
+      "propertyNames": { "type": "string" },
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "string" },
+          { "type": "array", "items": { "type": "string" } }
+        ]
+      },
+      "properties": {
+        "nudgeNorth": { "$ref": "#/$defs/key", "description": "Move selection north by the nudge step" },
+        "nudgeSouth": { "$ref": "#/$defs/key", "description": "Move selection south" },
+        "nudgeWest": { "$ref": "#/$defs/key", "description": "Move selection west" },
+        "nudgeEast": { "$ref": "#/$defs/key", "description": "Move selection east" },
+        "rotateLeft": { "$ref": "#/$defs/key", "description": "Rotate selection counter-clockwise (pending)" },
+        "rotateRight": { "$ref": "#/$defs/key", "description": "Rotate selection clockwise (pending)" },
+        "scaleUp": { "$ref": "#/$defs/key", "description": "Scale selection outward (pending)" },
+        "scaleDown": { "$ref": "#/$defs/key", "description": "Scale selection inward (pending)" },
+        "duplicate": { "$ref": "#/$defs/key", "description": "Duplicate the selected waypoints" },
+        "delete": { "$ref": "#/$defs/key", "description": "Delete the selected waypoints" },
+        "selectAll": { "$ref": "#/$defs/key", "description": "Select every waypoint" },
+        "clearSelection": { "$ref": "#/$defs/key", "description": "Clear the selection / cancel pending transform" },
+        "apply": { "$ref": "#/$defs/key", "description": "Commit the pending transform" },
+        "resetTransform": { "$ref": "#/$defs/key", "description": "Discard the pending transform" },
+        "moveMode": { "$ref": "#/$defs/key", "description": "Enter click-to-move-center mode" },
+        "boxSelect": { "$ref": "#/$defs/key", "description": "Toggle the box (marquee) selection tool" },
+        "export": { "$ref": "#/$defs/key", "description": "Export the edited KMZ" }
+      }
+    }
+  },
+  "$defs": {
+    "key": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" } }
+      ]
+    }
+  }
+}
