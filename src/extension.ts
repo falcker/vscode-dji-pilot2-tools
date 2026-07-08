@@ -77,7 +77,7 @@ async function loadKmzToWebview(filePath: string, webview: vscode.Webview, exten
 
   if (!kmlContent) {
     vscode.window.showErrorMessage('template.kml not found in KMZ.');
-    webview.html = buildStatusHtml('template.kml not found', 'template.kml is missing in this KMZ file. Please check that this is a DJI Pilot 2 mission file.');
+    webview.html = buildStatusHtml('template.kml not found', 'template.kml is missing in this KMZ file. Please check that this is a DJI Pilot 2 or FlightHub 2 mission file.');
     return;
   }
 
@@ -161,6 +161,14 @@ interface Waypoint {
   alt: number;
 }
 
+// `<Placemark>` ブロックから wpml の数値要素を取り出す（見つからなければ null）
+function extractWpmlNumber(block: string, tag: string): number | null {
+  const m = new RegExp(`<wpml:${tag}>\\s*(-?[\\d.]+)\\s*</wpml:${tag}>`).exec(block);
+  if (!m) { return null; }
+  const value = parseFloat(m[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
 // KML の内容から waypointを抽出する
 function parseKmlWaypoints(kml: string): Waypoint[] {
   const waypoints: Waypoint[] = [];
@@ -179,12 +187,23 @@ function parseKmlWaypoints(kml: string): Waypoint[] {
 
     const firstCoord = coordMatch[1].trim().split(/\s+/)[0];
     const parts = firstCoord.split(',');
-    if (parts.length < 3) { continue; }
+    if (parts.length < 2) { continue; }
 
     const lon = parseFloat(parts[0]);
     const lat = parseFloat(parts[1]);
-    const alt = parseFloat(parts[2]);
-    if (!Number.isFinite(lon) || !Number.isFinite(lat) || !Number.isFinite(alt)) { continue; }
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) { continue; }
+
+    // 高度の扱いは export 元で異なる:
+    // - DJI Pilot 2: `<coordinates>` が lon,lat,alt の 3 値を持つことがある
+    // - FlightHub 2 / WPML 標準: `<coordinates>` は lon,lat の 2 値で、高度は
+    //   `<wpml:executeHeight>` / `<wpml:height>` / `<wpml:ellipsoidHeight>` に格納される
+    const altFromCoord = parts.length >= 3 ? parseFloat(parts[2]) : NaN;
+    const alt = Number.isFinite(altFromCoord)
+      ? altFromCoord
+      : (extractWpmlNumber(block, 'executeHeight')
+        ?? extractWpmlNumber(block, 'height')
+        ?? extractWpmlNumber(block, 'ellipsoidHeight')
+        ?? 0);
 
     const indexMatch = indexRegex.exec(block);
     const index = indexMatch ? parseInt(indexMatch[1]) : autoIndex;
