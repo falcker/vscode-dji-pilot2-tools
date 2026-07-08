@@ -54,6 +54,10 @@ export interface EditingApi {
 
   // --- ショートカット表示用（action -> キー一覧） ---
   shortcuts: { action: string; keys: string[] }[];
+
+  // --- MapView 内のビュー操作をショートカットから呼ぶための登録先 ---
+  //     MapView がレンダー時に current を差し込み、standalone のキーハンドラが呼ぶ。
+  viewActions: { current: { toggle3D?: () => void; toggleCameras?: () => void; cycleBasemap?: () => void } };
 }
 
 declare global {

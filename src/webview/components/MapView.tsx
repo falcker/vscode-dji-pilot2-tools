@@ -428,6 +428,14 @@ export default function MapView({ waypoints, selection, onSelect, editing }: Pro
     });
   };
 
+  const cycleBasemap = () => {
+    const keys = Object.keys(BASEMAPS) as BasemapKey[];
+    switchBasemap(keys[(keys.indexOf(basemap) + 1) % keys.length]);
+  };
+
+  // ビュー操作をショートカット（standalone）から呼べるよう登録する
+  if (editing) { editing.viewActions.current = { toggle3D, toggleCameras, cycleBasemap }; }
+
   const BASEMAP_LABELS: Record<BasemapKey, string> = {
     seamless: '地理院 航空写真',
     std: '地理院 標準地図',

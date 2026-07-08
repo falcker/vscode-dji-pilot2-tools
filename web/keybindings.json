@@ -17,6 +17,9 @@
     "resetTransform": "ctrl+z",
     "moveMode": "g",
     "boxSelect": "b",
-    "export": "ctrl+s"
+    "export": "ctrl+s",
+    "toggle3d": "3",
+    "toggleCameras": "c",
+    "cycleBasemap": "m"
   }
 }

@@ -138,7 +138,9 @@ key combo → action; bindings live in a separately-editable `web/keybindings.js
 and **re-fetched every 2 s so edits hot-reload**. Defaults are gaming/editor-style
 (WASD/arrows = nudge, Q/E = rotate, +/- = scale, Ctrl+D = duplicate, Del = delete,
 Ctrl+A = select all, Esc = clear, Enter = apply, G = move, B = box select,
-Ctrl+S = export). The panel lists the live bindings.
+Ctrl+S = export, 3 = 3D, C = cameras, M = basemap). The panel lists the live
+bindings. `apply` (Enter) and `clearSelection` (Esc) also fire while a slider or
+number field is focused, so Enter commits right after adjusting a slider.
 
 ### Still pending
 - **Extension write-back** (`CustomEditorProvider` + webview message passing +

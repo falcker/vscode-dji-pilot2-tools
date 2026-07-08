@@ -89,6 +89,7 @@ function Standalone() {
   // ショートカット: 別ファイル keybindings.json を読み込み、変更をホットリロード
   const bindingsRef = useRef<Map<string, string>>(new Map());
   const actionsRef = useRef<Record<string, () => void>>({});
+  const viewActionsRef = useRef<{ toggle3D?: () => void; toggleCameras?: () => void; cycleBasemap?: () => void }>({});
   const [shortcuts, setShortcuts] = useState<{ action: string; keys: string[] }[]>([]);
 
   useEffect(() => {
@@ -111,9 +112,14 @@ function Standalone() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (isTypingTarget(e.target)) { return; }
       const action = bindingsRef.current.get(eventCombo(e));
-      const fn = action && actionsRef.current[action];
+      if (!action) { return; }
+      // 入力欄にフォーカスがあっても apply / clear は通す（スライダー操作直後の Enter 対策）。
+      // それ以外のショートカットは入力中は無効にする。
+      const typing = isTypingTarget(e.target);
+      if (typing && action !== 'apply' && action !== 'clearSelection') { return; }
+      if (typing) { (e.target as HTMLElement).blur?.(); }
+      const fn = actionsRef.current[action];
       if (fn) { e.preventDefault(); fn(); }
     };
     window.addEventListener('keydown', onKey);
@@ -259,6 +265,7 @@ function Standalone() {
       },
       warnings,
       shortcuts,
+      viewActions: viewActionsRef,
     };
 
     // keydown ハンドラが参照するアクション割当（毎レンダー最新化）
@@ -280,6 +287,9 @@ function Standalone() {
       moveMode: editing.onStartMove,
       boxSelect: editing.onToggleBox,
       export: editing.onExport,
+      toggle3d: () => viewActionsRef.current.toggle3D?.(),
+      toggleCameras: () => viewActionsRef.current.toggleCameras?.(),
+      cycleBasemap: () => viewActionsRef.current.cycleBasemap?.(),
     };
     return (
       <>

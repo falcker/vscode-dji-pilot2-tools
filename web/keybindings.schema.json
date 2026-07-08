@@ -34,7 +34,10 @@
         "resetTransform": { "$ref": "#/$defs/key", "description": "Discard the pending transform" },
         "moveMode": { "$ref": "#/$defs/key", "description": "Enter click-to-move-center mode" },
         "boxSelect": { "$ref": "#/$defs/key", "description": "Toggle the box (marquee) selection tool" },
-        "export": { "$ref": "#/$defs/key", "description": "Export the edited KMZ" }
+        "export": { "$ref": "#/$defs/key", "description": "Export the edited KMZ" },
+        "toggle3d": { "$ref": "#/$defs/key", "description": "Toggle 3D / 2D view" },
+        "toggleCameras": { "$ref": "#/$defs/key", "description": "Toggle showing all camera look-at rays" },
+        "cycleBasemap": { "$ref": "#/$defs/key", "description": "Cycle the basemap (aerial / std / OSM)" }
       }
     }
   },
