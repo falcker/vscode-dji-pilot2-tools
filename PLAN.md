@@ -97,7 +97,11 @@ zipping stays platform-specific.
   `translateWaypoints` on both files: reindex `wpml:index` + action-group index
   refs, renumber `actionGroupId` for uniqueness, regenerate `actionUUID`/
   `orientedFilePath`/`orientedFileSuffix` token via a **shared old→new ID map so
-  template and waylines stay consistent**, recompute `distance`/`duration`.
+  template and waylines stay consistent**, recompute `distance`/`duration`, and
+  **clamp curve-turn `waypointTurnDampingDist`** to fit new adjacent segments
+  (FlightHub rejects "turning distance too long" when an edit brings a
+  `coordinateTurn` waypoint close to a neighbour; stop-mode waypoints are left
+  alone since FlightHub tolerates their default damping).
 - **Selection** lifted into `standalone.tsx` (controlled; `App.tsx` keeps an
   uncontrolled fallback for the extension viewer). `WaypointTable`/`MapView`
   support single / Shift-range / Ctrl-⌘-add; selected waypoints are highlighted

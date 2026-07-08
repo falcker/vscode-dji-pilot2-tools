@@ -112,10 +112,47 @@ function shiftTakeOff(text: string, dLon: number, dLat: number): string {
   });
 }
 
+// カーブ旋回（damping で弧を描くモード）だけを対象に、旋回ダンピング距離を
+// 隣接区間に収まるよう抑える。停止モード（toPointAndStop*）は DJI 側で
+// ダンピングを使わないため対象外（FlightHub も短区間の 0.2 を許容する）。
+// 編集で waypoint が近接したとき「Turning distance too long」を防ぐ。
+const CURVE_TURN_MODES = new Set(['coordinateTurn', 'toPointAndPassWithContinuityCurvature']);
+
+export function clampTurnDamping(text: string): string {
+  const wps = parseKmlWaypoints(text);
+  const horiz = (a: typeof wps[0], b: typeof wps[0]) => {
+    const cl = Math.cos(((a.lat + b.lat) / 2) * Math.PI / 180);
+    return Math.hypot((b.lon - a.lon) * cl * METERS_PER_DEG, (b.lat - a.lat) * METERS_PER_DEG);
+  };
+  const minAdj: number[] = wps.map((w, i) => {
+    const dp = i > 0 ? horiz(wps[i - 1], w) : Infinity;
+    const dn = i < wps.length - 1 ? horiz(w, wps[i + 1]) : Infinity;
+    return Math.min(dp, dn);
+  });
+  const globalTurn = /<wpml:globalWaypointTurnMode>([^<]+)</.exec(text)?.[1] ?? '';
+
+  const parts = splitPlacemarks(text);
+  const blocks = parts.blocks.map((b) => {
+    const idx = blockIndex(b);
+    const perMode = /<wpml:waypointTurnMode>([^<]+)</.exec(b)?.[1];
+    const mode = perMode ?? globalTurn;
+    if (!CURVE_TURN_MODES.has(mode)) { return b; }
+    const cap = 0.49 * (minAdj[idx] ?? Infinity); // 両端合計が区間長を超えないよう半分弱に
+    if (!Number.isFinite(cap)) { return b; }
+    return b.replace(/(<wpml:waypointTurnDampingDist>)([-\d.]+)(<\/wpml:waypointTurnDampingDist>)/g, (_m, o, v, c) => {
+      const cur = parseFloat(v);
+      const nv = Math.min(cur, cap);
+      return nv < cur ? `${o}${Math.round(nv * 1000) / 1000}${c}` : `${o}${v}${c}`;
+    });
+  });
+  return joinPlacemarks({ ...parts, blocks });
+}
+
 interface EditOpts {
-  reindex: boolean;   // wpml:index を振り直す（削除/複製）
-  renumber: boolean;  // actionGroupId を振り直す（削除/複製）
-  recompute: boolean; // waylines の距離/時間を再計算する
+  reindex: boolean;    // wpml:index を振り直す（削除/複製）
+  renumber: boolean;   // actionGroupId を振り直す（削除/複製）
+  recompute: boolean;  // waylines の距離/時間を再計算する
+  clampTurns: boolean; // カーブ旋回ダンピングを隣接区間に合わせて抑える
 }
 
 function editText(text: string, transformBlocks: (blocks: string[]) => string[], isWaylines: boolean, opts: EditOpts): string {
@@ -124,6 +161,7 @@ function editText(text: string, transformBlocks: (blocks: string[]) => string[],
   if (opts.reindex) { blocks = reindexBlocks(blocks); }
   let out = joinPlacemarks({ ...parts, blocks });
   if (opts.renumber) { out = renumberActionGroupIds(out); }
+  if (opts.clampTurns) { out = clampTurnDamping(out); }
   if (isWaylines && opts.recompute) { out = recomputeDistanceDuration(out); }
   return out;
 }
@@ -138,7 +176,7 @@ function editRaw(raw: RawKmz, transformBlocks: (blocks: string[]) => string[], o
 
 // 選択 waypoint を削除する（残りを 0..n-1 に振り直す）
 export function deleteWaypoints(raw: RawKmz, indices: Set<number>): RawKmz {
-  return editRaw(raw, (blocks) => blocks.filter(b => !indices.has(blockIndex(b))), { reindex: true, renumber: true, recompute: true });
+  return editRaw(raw, (blocks) => blocks.filter(b => !indices.has(blockIndex(b))), { reindex: true, renumber: true, recompute: true, clampTurns: true });
 }
 
 // 選択 waypoint を複製し、選択範囲の直後に挿入する。ID は再生成する。
@@ -158,7 +196,7 @@ export function duplicateWaypoints(raw: RawKmz, indices: Set<number>): { raw: Ra
     });
     return result;
   };
-  const out = editRaw(raw, dup, { reindex: true, renumber: true, recompute: true });
+  const out = editRaw(raw, dup, { reindex: true, renumber: true, recompute: true, clampTurns: true });
   // 複製後の新しい index 範囲を算出（元の選択が k 個なら、最後の選択位置の直後 k 個）
   const orig = splitPlacemarks(raw.templateKml).blocks;
   let lastSelPos = -1;
@@ -173,7 +211,7 @@ export function duplicateWaypoints(raw: RawKmz, indices: Set<number>): { raw: Ra
 export function translateWaypoints(raw: RawKmz, indices: Set<number>, dLon: number, dLat: number): RawKmz {
   const move = (blocks: string[]): string[] =>
     blocks.map(b => (indices.has(blockIndex(b)) ? shiftCoordsInBlock(b, dLon, dLat) : b));
-  let out = editRaw(raw, move, { reindex: false, renumber: false, recompute: true });
+  let out = editRaw(raw, move, { reindex: false, renumber: false, recompute: true, clampTurns: true });
   // waypoint 0 を動かす場合は takeOffRefPoint も追従させる
   if (indices.has(0)) {
     out = { ...out, templateKml: shiftTakeOff(out.templateKml, dLon, dLat), waylinesWpml: out.waylinesWpml !== null ? shiftTakeOff(out.waylinesWpml, dLon, dLat) : null };
