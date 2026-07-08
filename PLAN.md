@@ -1,7 +1,8 @@
 # PLAN: Reusable flight-path editing & "stamp" for DJI FlightHub 2 missions
 
 > Source of truth for the editing feature. Kept up to date as work lands.
-> Status: **Phase 1 implemented** (standalone stamp & transform). Phases 2–3 pending.
+> Status: **Phases 1 & 2 implemented** (standalone stamp/transform + select/move/copy).
+> Phase 3 (extension write-back, scale, freehand drag) pending.
 
 ## Context
 
@@ -22,8 +23,10 @@ win.
 1. **Stamp & transform** (Phase 1 — done): open an existing mission, re-anchor its
    whole path to a new tank (translate + rotate), preview it, and export a
    **valid** new KMZ. Scale is designed-for but deferred.
-2. **Select / move / copy** (Phase 2): range-select waypoints, drag or nudge
-   them, duplicate or delete a segment, and export — all on the same engine.
+2. **Select / move / copy** (Phase 2 — done): range/multi-select waypoints,
+   duplicate or delete a segment, and move the selection (nudge by metres or
+   click-to-place), keeping both files valid. (Freehand per-waypoint drag
+   deferred to Phase 3.)
 3. Preserve **full file fidelity** — the exported KMZ must import cleanly into
    FlightHub 2.
 
@@ -87,15 +90,28 @@ zipping stays platform-specific.
   MapView; MapView renders the panel, handles anchor-pick map clicks, shows a new-
   anchor marker, and rebuilds layers when the (preview) waypoints change.
 
-### Phase 2 (planned)
-Selection-set refactor in `App.tsx`; multi-select in `WaypointTable.tsx`; freehand
-drag in `MapView.tsx` (`@deck.gl/editable-layers@^9.2.11` or hand-rolled);
-`src/shared/edits.ts` (duplicate/delete/move with ID regen + reindex + distance/
-duration recompute in `src/shared/serializeKmz.ts`).
+### Phase 2 (implemented)
+- **`src/shared/kmzDoc.ts`** — block model (`splitPlacemarks`/`joinPlacemarks`/
+  `blockIndex`) that round-trips byte-identically and preserves indentation.
+- **`src/shared/edits.ts`** — `deleteWaypoints`, `duplicateWaypoints`,
+  `translateWaypoints` on both files: reindex `wpml:index` + action-group index
+  refs, renumber `actionGroupId` for uniqueness, regenerate `actionUUID`/
+  `orientedFilePath`/`orientedFileSuffix` token via a **shared old→new ID map so
+  template and waylines stay consistent**, recompute `distance`/`duration`.
+- **Selection** lifted into `standalone.tsx` (controlled; `App.tsx` keeps an
+  uncontrolled fallback for the extension viewer). `WaypointTable`/`MapView`
+  support single / Shift-range / Ctrl-⌘-add; selected waypoints are highlighted
+  and their camera rays shown. Panel (in `TransformPanel.tsx`) offers Duplicate,
+  Delete, Move-to (click map) and N/S/E/W nudge by metres.
+- Structural edits mutate the working `RawKmz`, re-parse waypoints, and reset the
+  stamp transform; the Phase-1 stamp still overlays at export time.
 
-### Phase 3 (optional)
-Extension write-back (`CustomEditorProvider` + message passing + `showSaveDialog`);
-uniform scale with height/gimbal review.
+### Phase 3 (optional / pending)
+- **Freehand per-waypoint drag** (`@deck.gl/editable-layers@^9.2.11` or
+  hand-rolled, coordinating with maplibre pan).
+- **Uniform scale** about the anchor (with height/gimbal review).
+- **Extension write-back** (`CustomEditorProvider` + webview message passing +
+  `showSaveDialog`).
 
 ## Verification
 

@@ -23,3 +23,37 @@ export function kmzEntries(raw: RawKmz): { path: string; data: string | Uint8Arr
   }
   return entries;
 }
+
+// ---- ブロックモデル（構造編集: 複製 / 削除 / 移動 用） ----
+// WPML ファイルを header / <Placemark> ブロック列 / footer に分割する。
+// 各ブロックは直前の空白（インデント）を含むため、join で元のバイト列を完全再現でき、
+// ブロックを複製すると正しいインデントも一緒に複製される。
+
+export interface WpmlBlocks {
+  header: string;
+  blocks: string[];
+  footer: string;
+}
+
+export function splitPlacemarks(text: string): WpmlBlocks {
+  const re = /\s*<Placemark>[\s\S]*?<\/Placemark>/g;
+  const matches = [...text.matchAll(re)];
+  if (matches.length === 0) { return { header: text, blocks: [], footer: '' }; }
+  const first = matches[0];
+  const last = matches[matches.length - 1];
+  return {
+    header: text.slice(0, first.index),
+    blocks: matches.map(m => m[0]),
+    footer: text.slice(last.index! + last[0].length),
+  };
+}
+
+export function joinPlacemarks(b: WpmlBlocks): string {
+  return b.header + b.blocks.join('') + b.footer;
+}
+
+// ブロックの wpml:index を取り出す（無ければ -1）
+export function blockIndex(block: string): number {
+  const m = /<wpml:index>(\d+)<\/wpml:index>/.exec(block);
+  return m ? parseInt(m[1]) : -1;
+}

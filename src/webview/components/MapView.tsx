@@ -87,26 +87,27 @@ function computeCameraTarget(waypoints: Waypoint[], i: number, sourceZ: number):
 
 interface Props {
   waypoints: Waypoint[];
-  selectedIndex: number | null;
-  onWaypointClick: (index: number | null) => void;
+  selection: number[];
+  onSelect: (index: number, mods: { shift: boolean; meta: boolean }) => void;
   editing?: EditingApi;
 }
 
-export default function MapView({ waypoints, selectedIndex, onWaypointClick, editing }: Props) {
+export default function MapView({ waypoints, selection, onSelect, editing }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const overlayRef = useRef<any>(null);
   const is3DRef = useRef(true);
-  const selectedIndexRef = useRef<number | null>(null);
+  const selectionRef = useRef<number[]>([]);
   const showAllCamerasRef = useRef(false);
   const editingRef = useRef<EditingApi | undefined>(editing);
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
   const [is3D, setIs3D] = useState(true);
   const [showAllCameras, setShowAllCameras] = useState(false);
   const [basemap, setBasemap] = useState<BasemapKey>('seamless');
 
   function buildCameraLayers(is3D: boolean): any[] {
-    const sel = selectedIndexRef.current;
-    const selSi = sel !== null ? waypoints.findIndex(w => w.index === sel) : -1;
+    const selSet = new Set(selectionRef.current);
     const makeTarget = (si: number) => computeCameraTarget(waypoints, si, is3D ? waypoints[si].alt : 0);
     const layers: any[] = [];
 
@@ -114,7 +115,7 @@ export default function MapView({ waypoints, selectedIndex, onWaypointClick, edi
     if (showAllCamerasRef.current) {
       const others: CameraTarget[] = [];
       for (let si = 0; si < waypoints.length; si++) {
-        if (si === selSi) { continue; }
+        if (selSet.has(waypoints[si].index)) { continue; }
         const ct = makeTarget(si);
         if (ct) { others.push(ct); }
       }
@@ -146,33 +147,36 @@ export default function MapView({ waypoints, selectedIndex, onWaypointClick, edi
     }
 
     // 選択中の waypoint は「全カメラ表示」の状態に関わらず常に強調して描画する
-    if (selSi >= 0) {
-      const ct = makeTarget(selSi);
-      if (ct) {
-        layers.push(
-          new DeckGL.LineLayer({
-            id: 'camera-ray',
-            data: [ct],
-            getSourcePosition: (d: CameraTarget) => d.source,
-            getTargetPosition: (d: CameraTarget) => d.target,
-            getColor: [255, 170, 0, 255],
-            getWidth: 3,
-            widthMinPixels: 2,
-          }),
-          new DeckGL.ScatterplotLayer({
-            id: 'camera-target',
-            data: [ct],
-            getPosition: (d: CameraTarget) => d.target,
-            getFillColor: [255, 170, 0],
-            getLineColor: [0, 0, 0],
-            stroked: true,
-            getLineWidth: 1,
-            lineWidthMinPixels: 1,
-            getRadius: 3,
-            radiusMinPixels: 5,
-          }),
-        );
-      }
+    const selTargets: CameraTarget[] = [];
+    for (let si = 0; si < waypoints.length; si++) {
+      if (!selSet.has(waypoints[si].index)) { continue; }
+      const ct = makeTarget(si);
+      if (ct) { selTargets.push(ct); }
+    }
+    if (selTargets.length > 0) {
+      layers.push(
+        new DeckGL.LineLayer({
+          id: 'camera-ray',
+          data: selTargets,
+          getSourcePosition: (d: CameraTarget) => d.source,
+          getTargetPosition: (d: CameraTarget) => d.target,
+          getColor: [255, 170, 0, 255],
+          getWidth: 3,
+          widthMinPixels: 2,
+        }),
+        new DeckGL.ScatterplotLayer({
+          id: 'camera-target',
+          data: selTargets,
+          getPosition: (d: CameraTarget) => d.target,
+          getFillColor: [255, 170, 0],
+          getLineColor: [0, 0, 0],
+          stroked: true,
+          getLineWidth: 1,
+          lineWidthMinPixels: 1,
+          getRadius: 3,
+          radiusMinPixels: 5,
+        }),
+      );
     }
 
     return layers;
@@ -199,7 +203,8 @@ export default function MapView({ waypoints, selectedIndex, onWaypointClick, edi
 
   function buildLayers(is3D: boolean) {
     const getZ = (w: Waypoint) => is3D ? w.alt : 0;
-    const wpData = waypoints.map((w, i) => ({ ...w, color: getWpColor(i, waypoints.length) }));
+    const selSet = new Set(selectionRef.current);
+    const wpData = waypoints.map((w, i) => ({ ...w, color: getWpColor(i, waypoints.length), sel: selSet.has(w.index) }));
 
     return [
       ...buildCameraLayers(is3D),
@@ -233,15 +238,20 @@ export default function MapView({ waypoints, selectedIndex, onWaypointClick, edi
         id: 'waypoints',
         data: wpData,
         getPosition: (w: any) => [w.lon, w.lat, getZ(w)],
-        getFillColor: (w: any) => w.color,
-        getLineColor: [255, 255, 255],
+        getFillColor: (w: any) => (w.sel ? [255, 235, 59] : w.color),
+        getLineColor: (w: any) => (w.sel ? [255, 90, 0] : [255, 255, 255]),
         stroked: true,
-        getLineWidth: 2,
+        getLineWidth: (w: any) => (w.sel ? 3 : 2),
         lineWidthMinPixels: 1,
-        getRadius: 4,
+        getRadius: (w: any) => (w.sel ? 6 : 4),
         radiusMinPixels: 4,
+        updateTriggers: { getFillColor: selectionRef.current, getLineColor: selectionRef.current, getRadius: selectionRef.current },
         pickable: true,
-        onClick: ({ object }: any) => { onWaypointClick(object ? object.index : null); },
+        onClick: ({ object, event }: any) => {
+          if (!object) { return; }
+          const src = event?.srcEvent ?? {};
+          onSelectRef.current(object.index, { shift: !!src.shiftKey, meta: !!(src.ctrlKey || src.metaKey) });
+        },
         onHover: ({ object }: any) => {
           if (mapRef.current) { mapRef.current.getCanvas().style.cursor = object ? 'pointer' : ''; }
         },
@@ -300,11 +310,11 @@ export default function MapView({ waypoints, selectedIndex, onWaypointClick, edi
     });
     mapRef.current = map;
 
-    // 移動先ピック中の地図クリックで新しいアンカー座標を取得する
+    // ピックモード中の地図クリックを editing に渡す（アンカー指定 / 選択移動）
     map.on('click', (e: any) => {
       const ed = editingRef.current;
-      if (ed && ed.picking) {
-        ed.onNewAnchor([e.lngLat.lng, e.lngLat.lat]);
+      if (ed && ed.pickMode) {
+        ed.onMapPick([e.lngLat.lng, e.lngLat.lat]);
       }
     });
 
@@ -332,7 +342,11 @@ export default function MapView({ waypoints, selectedIndex, onWaypointClick, edi
           getRadius: 4,
           radiusMinPixels: 4,
           pickable: true,
-          onClick: ({ object }: any) => { onWaypointClick(object ? object.index : null); },
+          onClick: ({ object, event }: any) => {
+            if (!object) { return; }
+            const src = event?.srcEvent ?? {};
+            onSelectRef.current(object.index, { shift: !!src.shiftKey, meta: !!(src.ctrlKey || src.metaKey) });
+          },
           onHover: ({ object }: any) => {
             if (mapRef.current) { mapRef.current.getCanvas().style.cursor = object ? 'pointer' : ''; }
           },
@@ -363,17 +377,17 @@ export default function MapView({ waypoints, selectedIndex, onWaypointClick, edi
     return () => map.remove();
   }, []);
 
-  // 選択 waypoint が変わったらカメラ視線レイヤーを描き直す
+  // 選択が変わったらハイライト・カメラ視線レイヤーを描き直す
   useEffect(() => {
-    selectedIndexRef.current = selectedIndex;
+    selectionRef.current = selection;
     overlayRef.current?.setProps({ layers: buildLayers(is3DRef.current) });
-  }, [selectedIndex]);
+  }, [selection]);
 
-  // editing の最新値を ref に反映し、ピック中はカーソルを変える
+  // editing の最新値を ref に反映し、ピックモード中はカーソルを変える
   useEffect(() => {
     editingRef.current = editing;
     if (mapRef.current) {
-      mapRef.current.getCanvas().style.cursor = editing?.picking ? 'crosshair' : '';
+      mapRef.current.getCanvas().style.cursor = editing?.pickMode ? 'crosshair' : '';
     }
   }, [editing]);
 

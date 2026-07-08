@@ -1,19 +1,21 @@
 import React, { useEffect, useRef } from 'react';
-import { Waypoint } from '../types';
+import { SelectMods, Waypoint } from '../types';
 
 interface Props {
   waypoints: Waypoint[];
-  highlightedIndex: number | null;
-  onRowClick: (index: number | null) => void;
+  selection: number[];
+  onSelect: (index: number, mods: SelectMods) => void;
 }
 
-export default function WaypointTable({ waypoints, highlightedIndex, onRowClick }: Props) {
+export default function WaypointTable({ waypoints, selection, onSelect }: Props) {
   const rowRefs = useRef<Map<number, HTMLTableRowElement>>(new Map());
+  const selSet = new Set(selection);
+  const last = selection.length ? selection[selection.length - 1] : null;
 
   useEffect(() => {
-    if (highlightedIndex == null) { return; }
-    rowRefs.current.get(highlightedIndex)?.scrollIntoView({ block: 'nearest' });
-  }, [highlightedIndex]);
+    if (last == null) { return; }
+    rowRefs.current.get(last)?.scrollIntoView({ block: 'nearest' });
+  }, [last]);
 
   return (
     <div id="table-container">
@@ -26,8 +28,8 @@ export default function WaypointTable({ waypoints, highlightedIndex, onRowClick 
             <tr
               key={w.index}
               ref={el => { if (el) { rowRefs.current.set(w.index, el); } }}
-              className={highlightedIndex === w.index ? 'highlight' : undefined}
-              onClick={() => onRowClick(highlightedIndex === w.index ? null : w.index)}
+              className={selSet.has(w.index) ? 'highlight' : undefined}
+              onClick={(e) => onSelect(w.index, { shift: e.shiftKey, meta: e.ctrlKey || e.metaKey })}
               style={{ cursor: 'pointer' }}
             >
               <td>{w.index}</td>
