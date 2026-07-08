@@ -16,8 +16,8 @@ export default function App({ waypoints, filename, hasWpml }: Props) {
   return (
     <>
       <Header filename={filename} count={waypoints.length} hasWpml={hasWpml} />
-      <MapView waypoints={waypoints} onWaypointClick={setHighlightedIndex} />
-      <WaypointTable waypoints={waypoints} highlightedIndex={highlightedIndex} />
+      <MapView waypoints={waypoints} selectedIndex={highlightedIndex} onWaypointClick={setHighlightedIndex} />
+      <WaypointTable waypoints={waypoints} highlightedIndex={highlightedIndex} onRowClick={setHighlightedIndex} />
     </>
   );
 }

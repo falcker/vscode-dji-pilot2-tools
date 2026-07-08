@@ -4,9 +4,10 @@ import { Waypoint } from '../types';
 interface Props {
   waypoints: Waypoint[];
   highlightedIndex: number | null;
+  onRowClick: (index: number | null) => void;
 }
 
-export default function WaypointTable({ waypoints, highlightedIndex }: Props) {
+export default function WaypointTable({ waypoints, highlightedIndex, onRowClick }: Props) {
   const rowRefs = useRef<Map<number, HTMLTableRowElement>>(new Map());
 
   useEffect(() => {
@@ -26,6 +27,8 @@ export default function WaypointTable({ waypoints, highlightedIndex }: Props) {
               key={w.index}
               ref={el => { if (el) { rowRefs.current.set(w.index, el); } }}
               className={highlightedIndex === w.index ? 'highlight' : undefined}
+              onClick={() => onRowClick(highlightedIndex === w.index ? null : w.index)}
+              style={{ cursor: 'pointer' }}
             >
               <td>{w.index}</td>
               <td>{w.lat.toFixed(7)}</td>

@@ -27,24 +27,160 @@ function getWpColor(i: number, total: number): [number, number, number] {
   return [0, 170, 255];
 }
 
+const METERS_PER_DEG_LAT = 111320;
+
+// 北基準・時計回りの方位角（度, 0-360）を 2 点間で求める
+function bearingDeg(fromLon: number, fromLat: number, toLon: number, toLat: number): number {
+  const cosLat = Math.cos(((fromLat + toLat) / 2) * Math.PI / 180);
+  const dEast = (toLon - fromLon) * cosLat;
+  const dNorth = toLat - fromLat;
+  const az = Math.atan2(dEast, dNorth) * 180 / Math.PI;
+  return (az + 360) % 360;
+}
+
+interface CameraTarget {
+  source: [number, number, number];
+  target: [number, number, number];
+}
+
+// 選択された waypoint のカメラ視線を地面（z=0）まで伸ばした始点・着地点を求める
+function computeCameraTarget(waypoints: Waypoint[], i: number, sourceZ: number): CameraTarget | null {
+  const w = waypoints[i];
+  const cam = w.camera;
+  if (!cam) { return null; }
+
+  const depression = -cam.pitch;         // 水平からの見下ろし角（度）
+  if (depression <= 1) { return null; }  // ほぼ水平だと地面に当たらない
+
+  // 機体方位（followWayline 前提: 進行方向）。yaw が北基準なら不要だが aircraft 基準用に算出
+  let heading: number;
+  if (i < waypoints.length - 1) { heading = bearingDeg(w.lon, w.lat, waypoints[i + 1].lon, waypoints[i + 1].lat); }
+  else if (i > 0) { heading = bearingDeg(waypoints[i - 1].lon, waypoints[i - 1].lat, w.lon, w.lat); }
+  else { heading = 0; }
+
+  let azimuth: number;
+  if (cam.yawEnabled && cam.yaw !== null && cam.yawBase === 'north') { azimuth = cam.yaw; }
+  else if (cam.yawEnabled && cam.yaw !== null && cam.yawBase === 'aircraft') { azimuth = heading + cam.yaw; }
+  else { azimuth = heading; }
+  azimuth = ((azimuth % 360) + 360) % 360;
+
+  // 水平距離 = 高度 / tan(見下ろし角)。浅い角度で無限に伸びないよう上限を設ける
+  const depRad = depression * Math.PI / 180;
+  let horiz = w.alt / Math.tan(depRad);
+  const MAX_HORIZ = Math.max(w.alt * 6, 30);
+  if (!Number.isFinite(horiz) || horiz > MAX_HORIZ) { horiz = MAX_HORIZ; }
+  if (horiz < 0) { horiz = 0; }
+
+  const azRad = azimuth * Math.PI / 180;
+  const dNorth = horiz * Math.cos(azRad);
+  const dEast = horiz * Math.sin(azRad);
+  const cosLat = Math.cos(w.lat * Math.PI / 180);
+  const targetLon = w.lon + dEast / (METERS_PER_DEG_LAT * cosLat);
+  const targetLat = w.lat + dNorth / METERS_PER_DEG_LAT;
+
+  return {
+    source: [w.lon, w.lat, sourceZ],
+    target: [targetLon, targetLat, 0],
+  };
+}
+
 interface Props {
   waypoints: Waypoint[];
+  selectedIndex: number | null;
   onWaypointClick: (index: number | null) => void;
 }
 
-export default function MapView({ waypoints, onWaypointClick }: Props) {
+export default function MapView({ waypoints, selectedIndex, onWaypointClick }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const overlayRef = useRef<any>(null);
   const is3DRef = useRef(true);
+  const selectedIndexRef = useRef<number | null>(null);
+  const showAllCamerasRef = useRef(false);
   const [is3D, setIs3D] = useState(true);
+  const [showAllCameras, setShowAllCameras] = useState(false);
   const [basemap, setBasemap] = useState<BasemapKey>('seamless');
+
+  function buildCameraLayers(is3D: boolean): any[] {
+    const sel = selectedIndexRef.current;
+    const selSi = sel !== null ? waypoints.findIndex(w => w.index === sel) : -1;
+    const makeTarget = (si: number) => computeCameraTarget(waypoints, si, is3D ? waypoints[si].alt : 0);
+    const layers: any[] = [];
+
+    // 「全カメラ表示」ON のとき、選択中以外の全 waypoint を淡色で描画する
+    if (showAllCamerasRef.current) {
+      const others: CameraTarget[] = [];
+      for (let si = 0; si < waypoints.length; si++) {
+        if (si === selSi) { continue; }
+        const ct = makeTarget(si);
+        if (ct) { others.push(ct); }
+      }
+      if (others.length > 0) {
+        layers.push(
+          new DeckGL.LineLayer({
+            id: 'camera-ray-all',
+            data: others,
+            getSourcePosition: (d: CameraTarget) => d.source,
+            getTargetPosition: (d: CameraTarget) => d.target,
+            getColor: [255, 170, 0, 120],
+            getWidth: 1.5,
+            widthMinPixels: 1,
+          }),
+          new DeckGL.ScatterplotLayer({
+            id: 'camera-target-all',
+            data: others,
+            getPosition: (d: CameraTarget) => d.target,
+            getFillColor: [255, 170, 0, 150],
+            getLineColor: [0, 0, 0, 150],
+            stroked: true,
+            getLineWidth: 1,
+            lineWidthMinPixels: 1,
+            getRadius: 2.5,
+            radiusMinPixels: 3,
+          }),
+        );
+      }
+    }
+
+    // 選択中の waypoint は「全カメラ表示」の状態に関わらず常に強調して描画する
+    if (selSi >= 0) {
+      const ct = makeTarget(selSi);
+      if (ct) {
+        layers.push(
+          new DeckGL.LineLayer({
+            id: 'camera-ray',
+            data: [ct],
+            getSourcePosition: (d: CameraTarget) => d.source,
+            getTargetPosition: (d: CameraTarget) => d.target,
+            getColor: [255, 170, 0, 255],
+            getWidth: 3,
+            widthMinPixels: 2,
+          }),
+          new DeckGL.ScatterplotLayer({
+            id: 'camera-target',
+            data: [ct],
+            getPosition: (d: CameraTarget) => d.target,
+            getFillColor: [255, 170, 0],
+            getLineColor: [0, 0, 0],
+            stroked: true,
+            getLineWidth: 1,
+            lineWidthMinPixels: 1,
+            getRadius: 3,
+            radiusMinPixels: 5,
+          }),
+        );
+      }
+    }
+
+    return layers;
+  }
 
   function buildLayers(is3D: boolean) {
     const getZ = (w: Waypoint) => is3D ? w.alt : 0;
     const wpData = waypoints.map((w, i) => ({ ...w, color: getWpColor(i, waypoints.length) }));
 
     return [
+      ...buildCameraLayers(is3D),
       new DeckGL.PathLayer({
         id: 'ground-path',
         data: [{ path: waypoints.map(w => [w.lon, w.lat, 0]) }],
@@ -196,12 +332,25 @@ export default function MapView({ waypoints, onWaypointClick }: Props) {
     return () => map.remove();
   }, []);
 
+  // 選択 waypoint が変わったらカメラ視線レイヤーを描き直す
+  useEffect(() => {
+    selectedIndexRef.current = selectedIndex;
+    overlayRef.current?.setProps({ layers: buildLayers(is3DRef.current) });
+  }, [selectedIndex]);
+
   const toggle3D = () => {
     const next = !is3DRef.current;
     is3DRef.current = next;
     setIs3D(next);
     mapRef.current?.easeTo({ pitch: next ? 60 : 0, bearing: next ? -20 : 0, duration: 500 });
     overlayRef.current?.setProps({ layers: buildLayers(next) });
+  };
+
+  const toggleCameras = () => {
+    const next = !showAllCamerasRef.current;
+    showAllCamerasRef.current = next;
+    setShowAllCameras(next);
+    overlayRef.current?.setProps({ layers: buildLayers(is3DRef.current) });
   };
 
   const switchBasemap = (key: BasemapKey) => {
@@ -235,6 +384,9 @@ export default function MapView({ waypoints, onWaypointClick }: Props) {
         <div className="separator" />
         <button id="btn-3d" className={is3D ? 'active' : undefined} onClick={toggle3D}>
           3D 表示 {is3D ? 'ON' : 'OFF'}
+        </button>
+        <button id="btn-cameras" className={showAllCameras ? 'active' : undefined} onClick={toggleCameras}>
+          📷 All angles {showAllCameras ? 'ON' : 'OFF'}
         </button>
       </div>
     </div>
