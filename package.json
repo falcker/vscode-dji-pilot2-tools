@@ -70,6 +70,8 @@
     "compile": "npm run compile:ext && npm run compile:webview",
     "compile:ext": "tsc -p ./ --noEmit && node build-extension.mjs",
     "compile:webview": "node build-webview.mjs",
+    "build:standalone": "node build-standalone.mjs",
+    "standalone": "node build-standalone.mjs && npx --yes serve dist/web",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts"
   },

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "standalone",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["--yes", "serve", "dist/web", "-l", "5055"],
+      "port": 5055
+    }
+  ]
+}
