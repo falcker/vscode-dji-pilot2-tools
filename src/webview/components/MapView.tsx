@@ -102,6 +102,7 @@ export default function MapView({ waypoints, selection, onSelect, editing }: Pro
   const editingRef = useRef<EditingApi | undefined>(editing);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
+  const dragActiveRef = useRef(false);
   const [is3D, setIs3D] = useState(true);
   const [showAllCameras, setShowAllCameras] = useState(false);
   const [basemap, setBasemap] = useState<BasemapKey>('seamless');
@@ -182,25 +183,6 @@ export default function MapView({ waypoints, selection, onSelect, editing }: Pro
     return layers;
   }
 
-  function buildAnchorLayers(): any[] {
-    const na = editingRef.current?.newAnchor;
-    if (!na) { return []; }
-    return [
-      new DeckGL.ScatterplotLayer({
-        id: 'new-anchor',
-        data: [na],
-        getPosition: (d: [number, number]) => [d[0], d[1], 0],
-        getFillColor: [255, 0, 128],
-        getLineColor: [255, 255, 255],
-        stroked: true,
-        getLineWidth: 2,
-        lineWidthMinPixels: 2,
-        getRadius: 4,
-        radiusMinPixels: 7,
-      }),
-    ];
-  }
-
   function buildLayers(is3D: boolean) {
     const getZ = (w: Waypoint) => is3D ? w.alt : 0;
     const selSet = new Set(selectionRef.current);
@@ -208,7 +190,6 @@ export default function MapView({ waypoints, selection, onSelect, editing }: Pro
 
     return [
       ...buildCameraLayers(is3D),
-      ...buildAnchorLayers(),
       new DeckGL.PathLayer({
         id: 'ground-path',
         data: [{ path: waypoints.map(w => [w.lon, w.lat, 0]) }],
@@ -353,7 +334,33 @@ export default function MapView({ waypoints, selection, onSelect, editing }: Pro
         }),
       ];
 
-      const overlay = new MapboxOverlay({ layers: minimalLayers });
+      const llOf = (info: any): [number, number] => {
+        if (info.coordinate) { return [info.coordinate[0], info.coordinate[1]]; }
+        const p = map.unproject([info.x, info.y]);
+        return [p.lng, p.lat];
+      };
+      const overlay = new MapboxOverlay({
+        layers: minimalLayers,
+        // フリーハンドドラッグ: waypoint 上でドラッグ開始したら地図パンを止めて選択を移動
+        onDragStart: (info: any) => {
+          const ed = editingRef.current;
+          if (ed && info.layer?.id === 'waypoints' && info.object) {
+            dragActiveRef.current = true;
+            map.dragPan.disable();
+            ed.onDragStart(info.object.index, llOf(info));
+          }
+        },
+        onDrag: (info: any) => {
+          if (!dragActiveRef.current) { return; }
+          editingRef.current?.onDragMove(llOf(info));
+        },
+        onDragEnd: () => {
+          if (!dragActiveRef.current) { return; }
+          dragActiveRef.current = false;
+          map.dragPan.enable();
+          editingRef.current?.onDragEnd();
+        },
+      });
       overlayRef.current = overlay;
       map.addControl(overlay);
       map.addControl(new maplibregl.NavigationControl());
@@ -391,16 +398,10 @@ export default function MapView({ waypoints, selection, onSelect, editing }: Pro
     }
   }, [editing]);
 
-  // プレビュー座標（waypoints）や移動先が変わったらレイヤーを描き直す
+  // プレビュー座標（waypoints）が変わったらレイヤーを描き直す
   useEffect(() => {
     overlayRef.current?.setProps({ layers: buildLayers(is3DRef.current) });
-  }, [waypoints, editing?.newAnchor]);
-
-  // 移動先が設定されたらそこへ地図を寄せる
-  useEffect(() => {
-    const na = editing?.newAnchor;
-    if (na && mapRef.current) { mapRef.current.easeTo({ center: na, duration: 600 }); }
-  }, [editing?.newAnchor && editing.newAnchor[0], editing?.newAnchor && editing.newAnchor[1]]);
+  }, [waypoints]);
 
   const toggle3D = () => {
     const next = !is3DRef.current;

@@ -124,7 +124,10 @@ function rewriteOrientedShootHeadings(text: string, rotationDeg: number): string
   );
 }
 
-function applyToText(text: string, p: TransformParams): string {
+// 任意のテキスト（ファイル全体 or 1 つの <Placemark> ブロック）に座標・POI・
+// takeOffRefPoint・orientedShoot 方位の書き換えを適用する。ブロックに対して使うと
+// takeOffRefPoint の書き換えは単に何もしない（ブロックに含まれないため）。
+export function transformText(text: string, p: TransformParams): string {
   let out = rewriteCoordinates(text, p);
   out = rewritePoiPoint(out, p);
   out = rewriteTakeOffRefPoint(out, p);
@@ -137,7 +140,42 @@ export function transformRawKmz(raw: RawKmz, p: TransformParams): RawKmz {
   if (isIdentity(p)) { return raw; }
   return {
     ...raw,
-    templateKml: applyToText(raw.templateKml, p),
-    waylinesWpml: raw.waylinesWpml !== null ? applyToText(raw.waylinesWpml, p) : null,
+    templateKml: transformText(raw.templateKml, p),
+    waylinesWpml: raw.waylinesWpml !== null ? transformText(raw.waylinesWpml, p) : null,
   };
+}
+
+// 選択ダンピング用の変換内容（選択の重心まわりに回転・拡大、さらに平行移動）
+export interface SelXform {
+  rotationDeg: number;
+  scale: number;
+  dLon: number;
+  dLat: number;
+}
+
+export function isSelIdentity(x: SelXform): boolean {
+  return x.rotationDeg % 360 === 0 && x.scale === 1 && x.dLon === 0 && x.dLat === 0;
+}
+
+export function centroidOf(points: LonLat[]): LonLat {
+  let x = 0, y = 0;
+  for (const [lon, lat] of points) { x += lon; y += lat; }
+  return [x / points.length, y / points.length];
+}
+
+// プレビュー用: 選択 waypoint だけを重心まわりに変換する（座標＋カメラ yaw）
+export function transformSelectedWaypoints(wps: Waypoint[], sel: Set<number>, x: SelXform): Waypoint[] {
+  if (isSelIdentity(x) || sel.size === 0) { return wps; }
+  const selPts = wps.filter(w => sel.has(w.index)).map(w => [w.lon, w.lat] as LonLat);
+  if (selPts.length === 0) { return wps; }
+  const c = centroidOf(selPts);
+  const p: TransformParams = { anchor: c, newAnchor: [c[0] + x.dLon, c[1] + x.dLat], rotationDeg: x.rotationDeg, scale: x.scale };
+  const rot = x.rotationDeg % 360 !== 0;
+  return wps.map(w => {
+    if (!sel.has(w.index)) { return w; }
+    const [lon, lat] = transformPoint(w.lon, w.lat, p);
+    let camera = w.camera;
+    if (camera && rot && camera.yaw !== null) { camera = { ...camera, yaw: normDeg(camera.yaw + x.rotationDeg) }; }
+    return { ...w, lon, lat, camera };
+  });
 }

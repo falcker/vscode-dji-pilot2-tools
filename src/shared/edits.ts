@@ -4,6 +4,7 @@
 
 import { RawKmz, WpmlBlocks, blockIndex, joinPlacemarks, splitPlacemarks } from './kmzDoc';
 import { parseKmlWaypoints } from './parseKmz';
+import { LonLat, SelXform, TransformParams, centroidOf, isSelIdentity, transformText } from './transform';
 
 const METERS_PER_DEG = 111320;
 
@@ -223,4 +224,53 @@ export function translateWaypoints(raw: RawKmz, indices: Set<number>, dLon: numb
 export function metersToDegrees(dEast: number, dNorth: number, atLat: number): { dLon: number; dLat: number } {
   const cosLat = Math.cos(atLat * Math.PI / 180);
   return { dLon: dEast / (METERS_PER_DEG * cosLat), dLat: dNorth / METERS_PER_DEG };
+}
+
+// 選択の重心（template 座標から）
+export function selectionCentroid(raw: RawKmz, indices: Set<number>): LonLat | null {
+  const pts = parseKmlWaypoints(raw.templateKml).filter(w => indices.has(w.index)).map(w => [w.lon, w.lat] as LonLat);
+  return pts.length ? centroidOf(pts) : null;
+}
+
+// wp0 が動いた可能性があるとき takeOffRefPoint を wp0 に合わせる（lat,lon, alt は保持）
+function syncTakeOffToWp0(text: string): string {
+  const wps = parseKmlWaypoints(text);
+  if (!wps.length) { return text; }
+  const w0 = wps[0];
+  return text.replace(/(<wpml:takeOffRefPoint>)([^<]*)(<\/wpml:takeOffRefPoint>)/g, (m, o, body, c) => {
+    const rest = body.split(',').slice(2).join(',');
+    return `${o}${w0.lat.toFixed(9)},${w0.lon.toFixed(9)}${rest ? ',' + rest : ''}${c}`;
+  });
+}
+
+// 選択 waypoint を重心まわりに変換（回転・拡大＋平行移動）。純平行移動は
+// 誤差の無い translateWaypoints に委譲する。回転時は orientedShoot の絶対方位も回す。
+export function transformSelection(raw: RawKmz, indices: Set<number>, x: SelXform): RawKmz {
+  if (isSelIdentity(x) || indices.size === 0) { return raw; }
+  if (x.rotationDeg % 360 === 0 && x.scale === 1) {
+    return translateWaypoints(raw, indices, x.dLon, x.dLat);
+  }
+  const c = selectionCentroid(raw, indices);
+  if (!c) { return raw; }
+  const params: TransformParams = { anchor: c, newAnchor: [c[0] + x.dLon, c[1] + x.dLat], rotationDeg: x.rotationDeg, scale: x.scale };
+  const tf = (blocks: string[]): string[] => blocks.map(b => (indices.has(blockIndex(b)) ? transformText(b, params) : b));
+  let out = editRaw(raw, tf, { reindex: false, renumber: false, recompute: true, clampTurns: true });
+  if (indices.has(0)) {
+    out = { ...out, templateKml: syncTakeOffToWp0(out.templateKml), waylinesWpml: out.waylinesWpml !== null ? syncTakeOffToWp0(out.waylinesWpml) : null };
+  }
+  return out;
+}
+
+// 隣接 waypoint が閾値（既定 0.1m）より近い組を検出する安全装置。
+// 「複製したが動かしていない」等の重なりを警告するため。返り値は後続側の index。
+export function nearCoincidentWaypoints(raw: RawKmz, thresholdMeters = 0.1): number[] {
+  const wps = parseKmlWaypoints(raw.templateKml);
+  const flagged: number[] = [];
+  for (let i = 1; i < wps.length; i++) {
+    const a = wps[i - 1], b = wps[i];
+    const cl = Math.cos(((a.lat + b.lat) / 2) * Math.PI / 180);
+    const d = Math.hypot((b.lon - a.lon) * cl * METERS_PER_DEG, (b.lat - a.lat) * METERS_PER_DEG);
+    if (d < thresholdMeters) { flagged.push(b.index); }
+  }
+  return flagged;
 }

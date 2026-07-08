@@ -4,8 +4,8 @@ import JSZip from 'jszip';
 import App from './App';
 import { parseKmlWaypoints, Waypoint } from '../shared/parseKmz';
 import { RawKmz, kmzEntries } from '../shared/kmzDoc';
-import { LonLat, TransformParams, transformRawKmz, transformWaypoints } from '../shared/transform';
-import { deleteWaypoints, duplicateWaypoints, metersToDegrees, translateWaypoints } from '../shared/edits';
+import { LonLat, SelXform, isSelIdentity, transformSelectedWaypoints } from '../shared/transform';
+import { deleteWaypoints, duplicateWaypoints, metersToDegrees, nearCoincidentWaypoints, transformSelection } from '../shared/edits';
 import { EditingApi, SelectMods } from './types';
 
 interface Loaded {
@@ -62,18 +62,21 @@ function Standalone() {
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  // 変換（スタンプ）の状態
-  const [rotationDeg, setRotationDeg] = useState(0);
-  const [newAnchor, setNewAnchor] = useState<LonLat | null>(null);
-  const [pickMode, setPickMode] = useState<'anchor' | 'move' | null>(null);
-
   // 選択状態
   const [selection, setSelection] = useState<number[]>([]);
   const selAnchorRef = useRef<number | null>(null);
 
-  const resetTransform = useCallback(() => {
-    setRotationDeg(0);
-    setNewAnchor(null);
+  // 選択の保留中トランスフォーム（重心まわり回転・拡大＋移動）
+  const [selRotationDeg, setSelRotationDeg] = useState(0);
+  const [selScale, setSelScale] = useState(1);
+  const [pendMove, setPendMove] = useState<LonLat>([0, 0]);
+  const [pickMode, setPickMode] = useState<'move' | null>(null);
+  const dragStartRef = useRef<LonLat | null>(null);
+
+  const resetXform = useCallback(() => {
+    setSelRotationDeg(0);
+    setSelScale(1);
+    setPendMove([0, 0]);
     setPickMode(null);
   }, []);
 
@@ -82,7 +85,7 @@ function Standalone() {
     setBusy(true);
     try {
       const loaded = await loadKmz(file);
-      resetTransform();
+      resetXform();
       setSelection([]);
       selAnchorRef.current = null;
       setData(loaded);
@@ -92,10 +95,11 @@ function Standalone() {
     } finally {
       setBusy(false);
     }
-  }, [resetTransform]);
+  }, [resetXform]);
 
   // クリック修飾キーに応じて選択を更新する（単一 / 追加トグル / 範囲）
   const handleSelect = useCallback((index: number, mods: SelectMods) => {
+    resetXform();
     setSelection((prev) => {
       if (mods.shift && selAnchorRef.current !== null) {
         const a = selAnchorRef.current;
@@ -110,80 +114,96 @@ function Standalone() {
       }
       return prev.length === 1 && prev[0] === index ? [] : [index];
     });
-  }, []);
+  }, [resetXform]);
 
-  const anchor: LonLat | null = data ? [data.waypoints[0].lon, data.waypoints[0].lat] : null;
+  const selXform: SelXform = { rotationDeg: selRotationDeg, scale: selScale, dLon: pendMove[0], dLat: pendMove[1] };
 
-  const params: TransformParams | null = anchor
-    ? { anchor, newAnchor: newAnchor ?? anchor, rotationDeg, scale: 1 }
-    : null;
-
-  // プレビュー用に変換後の waypoint を計算（地図・カメラ視線に反映）
+  // プレビュー: 選択だけを保留トランスフォームで変換して表示
   const previewWaypoints = useMemo(
-    () => (data && params ? transformWaypoints(data.waypoints, params) : data?.waypoints ?? []),
-    [data, params?.newAnchor[0], params?.newAnchor[1], params?.rotationDeg],
+    () => (data ? transformSelectedWaypoints(data.waypoints, new Set(selection), selXform) : []),
+    [data, selection, selRotationDeg, selScale, pendMove[0], pendMove[1]],
   );
 
-  const exportKmz = useCallback(async () => {
-    if (!data || !params) { return; }
-    const outRaw = transformRawKmz(data.raw, params);
-    const zip = new JSZip();
-    for (const e of kmzEntries(outRaw)) { zip.file(e.path, e.data); }
-    const blob = await zip.generateAsync({ type: 'blob' });
-    const base = data.filename.replace(/\.kmz$/i, '');
-    triggerDownload(blob, `${base} - stamped.kmz`);
-  }, [data, params?.newAnchor[0], params?.newAnchor[1], params?.rotationDeg]);
+  // 安全装置: 近接（重なり）waypoint
+  const warnings = useMemo(() => (data ? nearCoincidentWaypoints(data.raw) : []), [data]);
 
-  // 構造編集を適用: 新しい RawKmz から waypoint を再解析し、スタンプ変換はリセットする
+  // 編集を適用: 新しい RawKmz から再解析し、保留トランスフォームをリセット
   const applyEdit = useCallback((cur: Loaded, newRaw: RawKmz, newSelection: number[]) => {
     const waypoints = parseKmlWaypoints(newRaw.templateKml);
-    resetTransform();
+    resetXform();
     setData({ ...cur, raw: newRaw, waypoints, hasWpml: newRaw.waylinesWpml !== null });
     setSelection(newSelection);
-  }, [resetTransform]);
+  }, [resetXform]);
 
-  if (data && anchor) {
-    const onDuplicate = () => {
-      if (!selection.length) { return; }
-      const { raw: nr, newIndices } = duplicateWaypoints(data.raw, new Set(selection));
-      applyEdit(data, nr, newIndices);
-    };
-    const onDelete = () => {
-      if (!selection.length) { return; }
-      applyEdit(data, deleteWaypoints(data.raw, new Set(selection)), []);
-    };
-    const onNudge = (dEast: number, dNorth: number) => {
-      if (!selection.length) { return; }
-      const { dLon, dLat } = metersToDegrees(dEast, dNorth, data.waypoints[selection[0]].lat);
-      applyEdit(data, translateWaypoints(data.raw, new Set(selection), dLon, dLat), selection);
-    };
-    const moveSelectionTo = (ll: LonLat) => {
-      if (!selection.length) { return; }
+  if (data) {
+    const selCentroid = (): LonLat => {
       let sx = 0, sy = 0;
-      for (const i of selection) { sx += data.waypoints[i].lon; sy += data.waypoints[i].lat; }
-      const cx = sx / selection.length, cy = sy / selection.length;
-      applyEdit(data, translateWaypoints(data.raw, new Set(selection), ll[0] - cx, ll[1] - cy), selection);
+      for (const i of selection) { const w = data.waypoints.find(x => x.index === i)!; sx += w.lon; sy += w.lat; }
+      return [sx / selection.length, sy / selection.length];
+    };
+    const commitXform = (x: SelXform) => {
+      if (!selection.length || isSelIdentity(x)) { return; }
+      applyEdit(data, transformSelection(data.raw, new Set(selection), x), selection);
     };
 
     const editing: EditingApi = {
-      anchor,
-      newAnchor,
-      rotationDeg,
-      moved: newAnchor !== null || rotationDeg % 360 !== 0,
       pickMode,
-      onPickAnchor: () => setPickMode('anchor'),
-      onRotationChange: setRotationDeg,
-      onReset: resetTransform,
-      onExport: () => { void exportKmz(); },
       onMapPick: (ll) => {
-        if (pickMode === 'anchor') { setNewAnchor(ll); setPickMode(null); }
-        else if (pickMode === 'move') { moveSelectionTo(ll); setPickMode(null); }
+        if (pickMode === 'move' && selection.length) {
+          const c = selCentroid();
+          setPendMove([ll[0] - c[0], ll[1] - c[1]]);
+        }
+        setPickMode(null);
+      },
+      onExport: () => {
+        const outRaw = (selection.length && !isSelIdentity(selXform))
+          ? transformSelection(data.raw, new Set(selection), selXform)
+          : data.raw;
+        const zip = new JSZip();
+        for (const e of kmzEntries(outRaw)) { zip.file(e.path, e.data); }
+        void zip.generateAsync({ type: 'blob' }).then((blob) => {
+          triggerDownload(blob, `${data.filename.replace(/\.kmz$/i, '')} - edited.kmz`);
+        });
       },
       selectionCount: selection.length,
-      onDuplicate,
-      onDelete,
+      onSelectAll: () => { resetXform(); setSelection(data.waypoints.map(w => w.index)); },
+      onClearSelection: () => { resetXform(); setSelection([]); },
+      onDuplicate: () => {
+        if (!selection.length) { return; }
+        const { raw: nr, newIndices } = duplicateWaypoints(data.raw, new Set(selection));
+        applyEdit(data, nr, newIndices);
+      },
+      onDelete: () => {
+        if (!selection.length) { return; }
+        applyEdit(data, deleteWaypoints(data.raw, new Set(selection)), []);
+      },
+      selRotationDeg,
+      selScale,
+      xformActive: !isSelIdentity(selXform),
+      onSelRotate: setSelRotationDeg,
+      onSelScale: setSelScale,
+      onNudge: (dEast, dNorth) => {
+        if (!selection.length) { return; }
+        const { dLon, dLat } = metersToDegrees(dEast, dNorth, selCentroid()[1]);
+        setPendMove(([x, y]) => [x + dLon, y + dLat]);
+      },
       onStartMove: () => { if (selection.length) { setPickMode('move'); } },
-      onNudge,
+      onApply: () => commitXform(selXform),
+      onResetXform: resetXform,
+      onDragStart: (index, ll) => {
+        if (!selection.includes(index)) { setSelection([index]); selAnchorRef.current = index; }
+        dragStartRef.current = ll;
+      },
+      onDragMove: (ll) => {
+        const s = dragStartRef.current;
+        if (s) { setPendMove([ll[0] - s[0], ll[1] - s[1]]); }
+      },
+      onDragEnd: () => {
+        const s = dragStartRef.current;
+        dragStartRef.current = null;
+        if (s) { commitXform(selXform); }
+      },
+      warnings,
     };
     return (
       <>

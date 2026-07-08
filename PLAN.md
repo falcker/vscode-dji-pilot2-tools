@@ -1,8 +1,8 @@
 # PLAN: Reusable flight-path editing & "stamp" for DJI FlightHub 2 missions
 
 > Source of truth for the editing feature. Kept up to date as work lands.
-> Status: **Phases 1 & 2 implemented** (standalone stamp/transform + select/move/copy).
-> Phase 3 (extension write-back, scale, freehand drag) pending.
+> Status: **Phases 1–3 implemented** (standalone). Selection is the single model:
+> select-all + transform = the whole-path "stamp". Extension write-back still pending.
 
 ## Context
 
@@ -110,12 +110,30 @@ zipping stays platform-specific.
 - Structural edits mutate the working `RawKmz`, re-parse waypoints, and reset the
   stamp transform; the Phase-1 stamp still overlays at export time.
 
-### Phase 3 (optional / pending)
-- **Freehand per-waypoint drag** (`@deck.gl/editable-layers@^9.2.11` or
-  hand-rolled, coordinating with maplibre pan).
-- **Uniform scale** about the anchor (with height/gimbal review).
+### Phase 3 (implemented)
+Selection transforms about the selection **centroid**, unified into one pending
+model (`SelXform = {rotationDeg, scale, dLon, dLat}`) with live preview + Apply:
+- **`transformSelection`** (`edits.ts`) rotates/scales the selected blocks about
+  their centroid (pure translation delegates to the exact `translateWaypoints`),
+  reusing `transformText` from `transform.ts`; rotates `orientedShoot` headings;
+  syncs `takeOffRefPoint` when wp0 is in the selection; clamps turn-damping +
+  recomputes distance.
+- **`transformSelectedWaypoints`** (`transform.ts`) does the same for the live
+  `Waypoint[]` preview.
+- UI (`TransformPanel`): Select-all/Clear, Duplicate/Delete, **Rotate** slider,
+  **Scale** slider, **Move center to…** (click map) + N/S/E/W nudge, Apply/Reset,
+  Export. Freehand **drag** of selected waypoints via deck.gl drag callbacks
+  (same pick pipeline as click-select) feeding the pending translate.
+- **Safeguard**: `nearCoincidentWaypoints` flags adjacent waypoints < 0.1 m
+  (e.g. a duplicate not yet moved); shown as a red banner before export.
+
+Whole-path re-anchor ("stamp") is now just **Select all → Move/Rotate → Apply**.
+
+### Still pending
 - **Extension write-back** (`CustomEditorProvider` + webview message passing +
-  `showSaveDialog`).
+  `showSaveDialog`) — editing remains standalone-only.
+- Freehand drag verified by analogy to click-select (same deck event pipeline);
+  worth a manual mouse confirmation.
 
 ## Verification
 

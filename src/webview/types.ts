@@ -16,24 +16,36 @@ export interface SelectMods {
 
 // スタンドアロン編集 UI 用の API（拡張の読み取り専用ビューでは undefined）
 export interface EditingApi {
-  // --- スタンプ（パス全体の移動・回転） ---
-  anchor: LonLat;             // 変換の基準点（waypoint 0）
-  newAnchor: LonLat | null;   // 移動先（未設定なら null = 未移動）
-  rotationDeg: number;
-  moved: boolean;             // 変換が恒等でないか（Export の見た目切替用）
-  pickMode: 'anchor' | 'move' | null; // 地図クリック待ち（アンカー指定 / 選択移動）
-  onPickAnchor: () => void;
-  onRotationChange: (deg: number) => void;
-  onReset: () => void;
+  pickMode: 'move' | null;         // 地図クリック待ち（選択の移動先指定）
+  onMapPick: (ll: LonLat) => void; // 地図クリック時、pickMode に応じて処理
   onExport: () => void;
-  onMapPick: (ll: LonLat) => void; // 地図がクリックされたときに pickMode に応じて処理
 
-  // --- 選択 waypoint の構造編集 ---
+  // --- 選択 waypoint の構造編集（即時） ---
   selectionCount: number;
+  onSelectAll: () => void;
+  onClearSelection: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
-  onStartMove: () => void;         // 選択を地図クリック先へ移動する pick モードに入る
-  onNudge: (dEast: number, dNorth: number) => void; // 選択を数値でずらす（メートル）
+
+  // --- 選択の保留中トランスフォーム（重心まわり回転・拡大＋移動）。
+  //     ライブプレビューし、Apply でコミット / Reset で破棄 ---
+  selRotationDeg: number;
+  selScale: number;
+  xformActive: boolean;            // 保留中トランスフォームが恒等でない
+  onSelRotate: (deg: number) => void;
+  onSelScale: (factor: number) => void;
+  onNudge: (dEast: number, dNorth: number) => void; // 保留移動をメートルで加算
+  onStartMove: () => void;         // 移動先を地図クリックで指定する pick モード
+  onApply: () => void;
+  onResetXform: () => void;
+
+  // --- フリーハンドドラッグ ---
+  onDragStart: (index: number, ll: LonLat) => void;
+  onDragMove: (ll: LonLat) => void;
+  onDragEnd: () => void;
+
+  // --- 安全装置: 近接（重なり）waypoint の index ---
+  warnings: number[];
 }
 
 declare global {
