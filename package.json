@@ -92,6 +92,7 @@
     "jszip": "^3.10.1",
     "maplibre-gl": "^5.19.0",
     "preact": "^10.28.4",
-    "preact-render-to-string": "^6.6.6"
+    "preact-render-to-string": "^6.6.6",
+    "xlsx": "^0.18.5"
   }
 }

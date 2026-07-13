@@ -148,6 +148,105 @@ number field is focused, so Enter commits right after adjusting a slider.
 - Freehand drag verified by analogy to click-select (same deck event pipeline);
   worth a manual mouse confirmation.
 
+---
+
+## Roadmap — planned (NOT yet implemented)
+
+Design sketches for upcoming work. Nothing below is built yet.
+
+### 1. Undo/redo history stack
+The working document is already a single immutable-ish value in `standalone.tsx`
+(`data.raw: RawKmz` + `selection`), and every structural/transform edit swaps it
+through one function (`applyEdit`). That makes undo cheap.
+
+- Keep `past: Snapshot[]` and `future: Snapshot[]` where
+  `Snapshot = { raw: RawKmz, selection: number[] }`. Snapshots are light — only
+  the two WPML strings differ between edits; the `others[]` image bytes are shared
+  by reference, so no copying of the ~40 MB `res/` payload.
+- `applyEdit` pushes the previous snapshot onto `past` and clears `future`;
+  **undo** pops `past` → current → `future`; **redo** the reverse. Cap depth
+  (e.g. 50) to bound memory.
+- Pending previews (`SelXform`) are *not* history entries — only committed edits
+  are. Undo first discards any pending transform (`resetXform`), then steps state.
+- Bindings: `Ctrl+Z` = undo, `Ctrl+Y` / `Ctrl+Shift+Z` = redo. **Conflict:**
+  `Ctrl+Z` is currently `resetTransform` — rebind reset to the Reset button /
+  `Esc`-adjacent key, or drop its default. Add Undo/Redo buttons + disabled states
+  in `TransformPanel`.
+- Touches: `standalone.tsx` only (state + two actions + bindings); no engine change.
+
+### 2. Scale the camera location (altitude/standoff) for a group
+Today `transformSelection` scale only scales horizontal position (lon/lat) about
+the centroid; heights are untouched. Add an **opt-in "scale height too"** so the
+whole camera geometry scales uniformly (bigger tank → orbit pushed out *and* up,
+preserving gimbal pitch and roughly the GSD).
+
+- Extend `SelXform` with a `scaleZ` (or a `scaleHeight: boolean` reusing `scale`).
+- In `edits.ts`, when scaling, also rewrite the selected blocks' height tags about
+  a reference height: `wpml:height` + `wpml:ellipsoidHeight` (template) and
+  `wpml:executeHeight` (waylines). Reference = min height of the selection (scale
+  standoff above the deck) — decide per UX.
+- `transform.ts` preview must scale `Waypoint.alt` for the selected set too.
+- Recompute `distance`/`duration` (already triggered) and re-run turn-damping
+  clamp. Heights are `relativeToStartPoint`, so scaling is a pure multiply; no
+  datum concerns. UI: a small "scale altitude with position" checkbox by the scale
+  slider.
+
+### 3. Shift to add / remove from a selection
+Current modifiers: Shift = range, Ctrl/⌘ = add-toggle. Change so **Shift = add /
+remove (toggle)** a waypoint on click, matching common 3D-tool convention.
+
+- `handleSelect` in `standalone.tsx` (and the uncontrolled fallback in `App.tsx`):
+  make `shift` the toggle modifier (add if absent, remove if present). Move
+  range-select to `Ctrl/⌘+Shift+click` (anchor→click), or keep range on a separate
+  gesture. Box-select already adds with Shift — keep consistent.
+- Pure UI/state change; no engine impact. Update the panel hint text and README.
+
+### 4. 3D model incorporation (context mesh)
+Render the actual structure/site (tank, plant) as a 3D model so waypoints and
+camera rays can be placed against real geometry, not just the basemap.
+
+- Load a local **glTF/GLB** (drag-in) via deck.gl `ScenegraphLayer`
+  (`@deck.gl/mesh-layers` + `@loaders.gl/gltf`), or an **OGC 3D Tiles** tileset via
+  `Tile3DLayer` (`@deck.gl/geo-layers` + `@loaders.gl/3d-tiles`) for large scans.
+- **Georeferencing is the hard part:** the model needs an anchor (lon/lat/alt),
+  heading, and scale to sit correctly under the waypoints. Provide a small
+  "place model" panel (reuse the click-anchor + rotation + scale UX) and persist
+  the transform alongside the session (not in the KMZ).
+- Render beneath the waypoint/flight-path layers in `MapView.buildLayers`. Watch
+  performance (draw calls, memory) and depth vs. the 2.5-D waypoint markers.
+- New deps + bundle-size increase; keep it lazy-loaded / behind a toggle.
+
+### 5. Orthophoto overlay
+Drape a georeferenced orthophoto over the map for alignment (place a scan on the
+actual imagery of a new tank).
+
+- Simplest: user provides an image + geographic bounds `[W,S,E,N]` → deck
+  `BitmapLayer` under the waypoints. Better: read bounds from a **GeoTIFF** via
+  `geotiff.js` (COG-friendly), or consume a pre-tiled **XYZ/TMS** set as a maplibre
+  raster source (add to `makeStyle`).
+- Add an opacity control and a toggle; render below flight-path, above basemap.
+- Reprojection: assume the ortho is web-mercator/WGS84; warn otherwise. Large
+  GeoTIFFs need tiling/downsampling — document the size ceiling.
+
+### 6. Heightmap / DEM incorporation
+Replace the current **flat-ground (z=0) assumption** for camera-ray ground targets
+with real terrain, and enable true 3D ground.
+
+- Two uses: (a) **visual** — enable maplibre-gl 3D terrain (`setTerrain` with a
+  `raster-dem` / terrain-RGB source) so the scene has real relief; (b) **compute**
+  — sample elevation at each waypoint lon/lat (from terrain-RGB tiles or a provided
+  **GeoTIFF DEM** via `geotiff.js`) so `computeCameraTarget` intersects true ground
+  and AGL/height validation is meaningful.
+- Feeds the existing camera look-at feature (see "flat-ground assumption"
+  limitation) and would let us flag waypoints below terrain or with wrong AGL.
+- Source options: a hosted terrain-RGB tileset (needs network) or a local DEM file
+  (offline). Keep the flat-ground path as fallback when no DEM is loaded.
+
+**Cross-cutting note (items 4–6):** these are *context/georeferencing* layers, not
+KMZ edits — none of them change the exported mission. They share one need: a
+robust **georeference/place transform** (anchor lon/lat/alt + heading + scale),
+which the existing click-anchor + rotate + scale UX can be generalized to provide.
+
 ## Verification
 
 - **Identity round-trip:** transform 0° / same anchor, export → byte-identical
